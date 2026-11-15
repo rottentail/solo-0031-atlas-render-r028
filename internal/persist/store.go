@@ -41,12 +41,24 @@ func Open(path string) (*Store, error) {
 			s.Close()
 			return nil, fmt.Errorf("invalid persisted JSON: %w", e)
 		}
+		backfillLineage(&s.state)
 		if e = Validate(s.state); e != nil {
 			s.Close()
 			return nil, e
 		}
 	}
 	return s, nil
+}
+
+// backfillLineage assigns root lineage to jobs persisted before lineage was
+// recorded. Such jobs are their own attempt roots; new re-runs branch from them.
+func backfillLineage(st *model.State) {
+	for id, j := range st.Jobs {
+		if j.Lineage.RootID == "" {
+			j.Lineage = model.RootLineage(id)
+			st.Jobs[id] = j
+		}
+	}
 }
 func (s *Store) Close() error {
 	if s.lock == nil {

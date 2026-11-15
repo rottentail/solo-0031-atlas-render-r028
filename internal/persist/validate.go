@@ -61,6 +61,9 @@ func Validate(s model.State) error {
 		default:
 			return fmt.Errorf("invalid job state")
 		}
+		if e := ValidateLineage(s, j); e != nil {
+			return e
+		}
 		if e := ValidateSnapshot(j.Payload); e != nil {
 			return e
 		}
@@ -103,6 +106,44 @@ func ValidateAsset(a model.Asset) error {
 	}
 	if img.Bounds().Dx() != a.Width || img.Bounds().Dy() != a.Height {
 		return model.Invalid("asset dimensions mismatch")
+	}
+	return nil
+}
+func ValidateLineage(s model.State, j model.Job) error {
+	l := j.Lineage
+	// Records persisted before lineage existed are filled in by the migration in
+	// store.Open; anything reaching validation must carry complete lineage.
+	if l.RootID == "" {
+		return fmt.Errorf("job %s missing lineage root", j.ID)
+	}
+	if _, ok := s.Jobs[l.RootID]; !ok {
+		return fmt.Errorf("job %s lineage root missing", j.ID)
+	}
+	switch l.Source {
+	case "submit":
+		if l.RootID != j.ID || l.ParentID != "" || l.Depth != 0 || l.Mode != "" {
+			return fmt.Errorf("invalid submit lineage for job %s", j.ID)
+		}
+	case "retry":
+		if l.ParentID != j.ID || l.Depth != 0 || (l.Mode != "frozen" && l.Mode != "") {
+			return fmt.Errorf("invalid retry lineage for job %s (%+v)", j.ID, l)
+		}
+	case "rerun":
+		if l.ParentID == "" || l.ParentID == j.ID || l.Depth < 1 {
+			return fmt.Errorf("invalid rerun lineage for job %s", j.ID)
+		}
+		parent, ok := s.Jobs[l.ParentID]
+		if !ok {
+			return fmt.Errorf("job %s lineage parent missing", j.ID)
+		}
+		if l.RootID != parent.Lineage.RootID || l.Depth != parent.Lineage.Depth+1 {
+			return fmt.Errorf("job %s lineage chain inconsistent", j.ID)
+		}
+		if l.Mode != "frozen" && l.Mode != "current" {
+			return fmt.Errorf("invalid rerun mode for job %s", j.ID)
+		}
+	default:
+		return fmt.Errorf("invalid lineage source for job %s", j.ID)
 	}
 	return nil
 }

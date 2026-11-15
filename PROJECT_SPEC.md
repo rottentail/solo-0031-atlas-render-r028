@@ -10,7 +10,7 @@
 
 场景 `active ↔ archived`，每次有效状态转换增加修订；归档后拒绝修订和冻结。素材 `available → retired`，相同 ID 不能替换为不同内容。冻结把场景修订与可用素材字节捕获成快照；快照 `active → revoked`，不可恢复。快照摘要覆盖文档和素材闭包，不覆盖可变撤回状态。
 
-任务 `queued → running → succeeded/failed/cancelled`，排队时也可取消。failed/cancelled 可显式重试，attempt 增加且沿用固定输入；succeeded 不能重试。启动恢复将 running 变回 queued，不增加 attempt。结果 `live → purged`，清理不会把成功任务改成失败。
+任务 `queued → running → succeeded/failed/cancelled`，排队时也可取消。failed/cancelled 可显式重试，attempt 增加且沿用固定输入；succeeded 不能重试。failed/cancelled 也可通过 reruns 显式选择：`frozen` 沿用源任务冻结快照创建新任务，`current` 凭 expectedRevision 在同一事务冻结当前场景修订再创建新任务；两种 rerun 都强制幂等键、保留 lineage 血缘，源任务终态不变。启动恢复将 running 变回 queued，不增加 attempt。结果 `live → purged`，清理不会把成功任务改成失败。
 
 ## 关键规则
 
@@ -18,7 +18,7 @@
 - 快照冻结检查每个引用素材可用，捕获全部字节；冻结后的渲染不读取当前素材记录。
 - 幂等收据的请求语义为快照 ID 和输出倍数。相同收据可重放原任务，即使快照后来撤回。
 - 接受任务前编译并核对工作预算；执行器领取按创建时间、ID 排序。当前只有一个执行器。
-- 取消在持久事务中提交；执行结束必须再次检查状态和尝试身份，避免过期结果覆盖。
+- 取消在持久事务中提交；执行结束必须再次检查状态和尝试身份，避免过期结果覆盖。reruns 不修改源终态任务，新任务以独立 ID 入队，取消与完成只可能产生一个终态结果。
 - 先写入临时文件并调用fsync，再原子替换目标，成功后才切换内存状态。写入失败时旧内存保持可读。
 - 导入包先验证外层摘要、快照摘要、素材闭包、素材摘要和尺寸；目标同名异内容或退役素材会使整个提交失败。
 - 结果比较以解码像素为准，返回改变像素数量、最大单通道差异、平均通道差异。不同尺寸拒绝比较。

@@ -79,6 +79,13 @@ type Snapshot struct {
 	Digest    string           `json:"digest"`
 	CreatedAt time.Time        `json:"createdAt"`
 }
+type Lineage struct {
+	RootID   string `json:"rootId"`
+	ParentID string `json:"parentId"`
+	Depth    int    `json:"depth"`
+	Source   string `json:"source"`
+	Mode     string `json:"mode"`
+}
 type Job struct {
 	ID         string    `json:"id"`
 	SnapshotID string    `json:"snapshotId"`
@@ -87,6 +94,7 @@ type Job struct {
 	Attempt    int       `json:"attempt"`
 	Error      string    `json:"error,omitempty"`
 	ArtifactID string    `json:"artifactId,omitempty"`
+	Lineage    Lineage   `json:"lineage"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
 	Payload    Snapshot  `json:"payload"`
@@ -159,3 +167,7 @@ func (s *State) Emit(kind, id string) {
 	}
 }
 func ID(prefix string, seq int) string { return fmt.Sprintf("%s-%08d", prefix, seq) }
+
+func RootLineage(id string) Lineage {
+	return Lineage{RootID: id, ParentID: "", Depth: 0, Source: "submit", Mode: ""}
+}

@@ -20,6 +20,8 @@ python3 scripts/walkthrough.py --workflow submit-render --out var/demo
 python3 scripts/walkthrough.py --workflow retire-asset
 python3 scripts/walkthrough.py --workflow cancel-render
 python3 scripts/walkthrough.py --workflow retry-render
+python3 scripts/walkthrough.py --workflow rerun-frozen
+python3 scripts/walkthrough.py --workflow rerun-current
 python3 scripts/walkthrough.py --workflow recover-render
 python3 scripts/walkthrough.py --workflow import-package
 python3 scripts/walkthrough.py --workflow compare-renders
@@ -35,6 +37,8 @@ python3 scripts/walkthrough.py --workflow compare-renders
 4. `GET /v1/jobs/{id}` 等待 `succeeded`，再读取 `GET /v1/artifacts/{artifactId}`。
 
 同一幂等键和同一请求返回原任务；同键不同请求返回 409。快照包含引用素材的字节，后续场景编辑或素材退役不改变它。撤回快照会阻止新工作，已接受的任务仍使用固定输入。任务取消和结果提交竞争同一个持久状态；终态完成后不可取消。
+
+取消或失败后再次执行有两条显式路径。`POST /v1/jobs/{id}/retry` 在原任务上递增 attempt，始终沿用提交时冻结的固定输入。需要明确选择输入版本时调用 `POST /v1/jobs/{id}/reruns`：`mode:"frozen"` 创建沿用同一冻结快照的新任务，`mode:"current"` 配合 `expectedRevision` 在同一事务冻结场景当前修订再渲染，修订不匹配返回 409。reruns 必须带 `Idempotency-Key`，同键同语义重放同一新任务，重启后仍生效，重复点击不会多出执行承诺；源任务保持终态，血缘通过任务的 `lineage` 字段和 `job.rerun` 事件追溯。
 
 ## 范围与限制
 

@@ -140,7 +140,7 @@ def run(demo, workflow, out):
         corrupt = json.loads(json.dumps(package)); corrupt['snapshot']['document']['width'] += 1
         demo.call('POST', '/v1/imports/corrupt', {'name': '损坏包', 'package': corrupt}, 400)
         demo.call('GET', '/v1/scenes/corrupt', status=404)
-    if workflow in ('cancel-render', 'retry-render', 'recover-render'):
+    if workflow in ('cancel-render', 'retry-render', 'recover-render', 'rerun-frozen', 'rerun-current'):
         heavy = sample(); heavy['width'] = 1500; heavy['height'] = 1500
         heavy['layers'] = [dict(heavy['layers'][0], id=f'sheet-{i}', width=1500, height=1500, transform={'scaleX': 1, 'scaleY': 1}) for i in range(16)]
         put(heavy, current['revision'])
@@ -152,14 +152,66 @@ def run(demo, workflow, out):
     if workflow == 'revoke-snapshot':
         demo.call('POST', '/v1/snapshots/' + snapshot['id'] + '/revoke')
         demo.call('POST', '/v1/jobs', {'snapshotId': snapshot['id'], 'scale': 1}, 409, {'Idempotency-Key': 'blocked-after-revoke'})
-    if workflow in ('cancel-render', 'retry-render'):
+    if workflow in ('cancel-render', 'retry-render', 'rerun-frozen', 'rerun-current'):
         stopped = demo.call('POST', '/v1/jobs/' + job['id'] + '/cancel')
         assert stopped['state'] == 'cancelled'
         if workflow == 'cancel-render':
             time.sleep(.1); assert demo.call('GET', '/v1/jobs/' + job['id'])['state'] == 'cancelled'
             return {'workflow': workflow, 'state': 'cancelled'}
-        job = demo.call('POST', '/v1/jobs/' + job['id'] + '/retry', status=202)
-        assert job['attempt'] == 2
+        if workflow == 'retry-render':
+            job = demo.call('POST', '/v1/jobs/' + job['id'] + '/retry', status=202)
+            assert job['attempt'] == 2
+    if workflow == 'rerun-frozen':
+        path = '/v1/jobs/' + job['id'] + '/reruns'
+        headers = {'Idempotency-Key': 'rerun-frozen-one'}
+        rerun_job = demo.call('POST', path, {'mode': 'frozen'}, 202, headers)
+        assert rerun_job['id'] != job['id']
+        # Repeated clicks with the same key replay the same promise: no extra job.
+        assert demo.call('POST', path, {'mode': 'frozen'}, 202, headers)['id'] == rerun_job['id']
+        # Same key with different request semantics is rejected.
+        demo.call('POST', path, {'mode': 'current', 'expectedRevision': 1}, 409, headers)
+        # Unknown modes and missing idempotency keys are refused.
+        demo.call('POST', path, {'mode': 'latest'}, 400, {'Idempotency-Key': 'rerun-frozen-bad'})
+        demo.call('POST', path, {'mode': 'frozen'}, 400)
+        lineage = rerun_job['lineage']
+        assert lineage['rootId'] == job['id'] and lineage['parentId'] == job['id']
+        assert lineage['source'] == 'rerun' and lineage['mode'] == 'frozen' and lineage['depth'] == 1
+        assert rerun_job['snapshotId'] == snapshot['id'] and rerun_job['attempt'] == 1
+        # The cancelled source job stays terminal: cancellation cannot double-resolve.
+        assert demo.call('GET', '/v1/jobs/' + job['id'])['state'] == 'cancelled'
+        result = demo.wait(rerun_job['id'])
+        assert result['state'] == 'succeeded'
+        png = demo.call('GET', '/v1/artifacts/' + result['artifactId'])
+        assert struct.unpack('>II', png[16:24]) == (snapshot['document']['width'], snapshot['document']['height'])
+        events = demo.call('GET', '/v1/events')
+        assert any(e['kind'] == 'job.rerun' and e['subject'] == rerun_job['id'] for e in events)
+        return {'workflow': workflow, 'state': result['state'], 'sourceJob': job['id'], 'rerunJob': rerun_job['id'], 'pngDigest': hashlib.sha256(png).hexdigest()}
+    if workflow == 'rerun-current':
+        # Edit the scene after the cancellation; the frozen snapshot must stay unchanged.
+        revised = sample(); revised['background'] = '#102030'
+        saved = put(revised, current['revision'] + 1)
+        assert saved['revision'] == current['revision'] + 2
+        path = '/v1/jobs/' + job['id'] + '/reruns'
+        # Naming a stale revision must conflict instead of silently using latest.
+        demo.call('POST', path, {'mode': 'current', 'expectedRevision': current['revision'] + 1}, 409,
+                  {'Idempotency-Key': 'rerun-current-stale'})
+        # current mode requires an explicit revision.
+        demo.call('POST', path, {'mode': 'current'}, 400, {'Idempotency-Key': 'rerun-current-missing'})
+        headers = {'Idempotency-Key': 'rerun-current-one'}
+        rerun_job = demo.call('POST', path, {'mode': 'current', 'expectedRevision': saved['revision']}, 202, headers)
+        assert demo.call('POST', path, {'mode': 'current', 'expectedRevision': saved['revision']}, 202, headers)['id'] == rerun_job['id']
+        assert rerun_job['snapshotId'] != snapshot['id']
+        lineage = rerun_job['lineage']
+        assert lineage['rootId'] == job['id'] and lineage['parentId'] == job['id']
+        assert lineage['mode'] == 'current' and lineage['depth'] == 1
+        new_snapshot = demo.call('GET', '/v1/snapshots/' + rerun_job['snapshotId'])
+        assert new_snapshot['document']['background'] == '#102030'
+        assert demo.call('GET', '/v1/jobs/' + job['id'])['state'] == 'cancelled'
+        result = demo.wait(rerun_job['id'])
+        assert result['state'] == 'succeeded'
+        png = demo.call('GET', '/v1/artifacts/' + result['artifactId'])
+        assert struct.unpack('>II', png[16:24]) == (new_snapshot['document']['width'], new_snapshot['document']['height'])
+        return {'workflow': workflow, 'state': result['state'], 'sourceJob': job['id'], 'rerunJob': rerun_job['id'], 'pngDigest': hashlib.sha256(png).hexdigest()}
     if workflow == 'recover-render':
         demo.wait(job['id'], wanted=('running',)); demo.stop(abrupt=True); demo.start()
     result = demo.wait(job['id'])

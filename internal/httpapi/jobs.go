@@ -51,6 +51,23 @@ func (a API) retry(w http.ResponseWriter, r *http.Request) {
 	v.Payload = model.Snapshot{}
 	write(w, 202, v)
 }
+func (a API) rerun(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Mode     string `json:"mode"`
+		Expected int    `json:"expectedRevision"`
+	}
+	if e := decode(w, r, &b); e != nil {
+		fail(w, e)
+		return
+	}
+	v, e := a.Service.Rerun(r.PathValue("id"), b.Mode, b.Expected, r.Header.Get("Idempotency-Key"))
+	if e != nil {
+		fail(w, e)
+		return
+	}
+	v.Payload = model.Snapshot{}
+	write(w, 202, v)
+}
 func (a API) download(w http.ResponseWriter, r *http.Request) {
 	v, e := a.Service.Artifact(r.PathValue("id"))
 	if e != nil {

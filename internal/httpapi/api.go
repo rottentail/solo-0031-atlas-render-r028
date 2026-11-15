@@ -57,6 +57,7 @@ func (a API) Handler() http.Handler {
 	m.HandleFunc("GET /v1/jobs/{id}", a.getJob)
 	m.HandleFunc("POST /v1/jobs/{id}/cancel", a.cancel)
 	m.HandleFunc("POST /v1/jobs/{id}/retry", a.retry)
+	m.HandleFunc("POST /v1/jobs/{id}/reruns", a.rerun)
 	m.HandleFunc("GET /v1/artifacts/{id}", a.download)
 	m.HandleFunc("DELETE /v1/artifacts/{id}", a.purge)
 	m.HandleFunc("POST /v1/compare", a.compare)

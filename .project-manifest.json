@@ -246,6 +246,42 @@
       "verification": "python3 scripts/walkthrough.py --workflow retry-render"
     },
     {
+      "module_ids": [
+        "httpapi",
+        "service",
+        "engine",
+        "persist"
+      ],
+      "steps": [
+        "经公开HTTP入口完成领域转换",
+        "通过存储或渲染结果观察已提交事实"
+      ],
+      "id": "rerun-frozen",
+      "name": "按冻结内容重新执行",
+      "entry": "POST /v1/jobs/{id}/reruns",
+      "success": "创建带血缘的新任务并沿用取消时的同一份冻结快照，同键重放同一任务",
+      "failure": "撤回快照拒绝、成功任务拒绝、同键异语义409",
+      "verification": "python3 scripts/walkthrough.py --workflow rerun-frozen"
+    },
+    {
+      "module_ids": [
+        "httpapi",
+        "service",
+        "engine",
+        "persist"
+      ],
+      "steps": [
+        "经公开HTTP入口完成领域转换",
+        "通过存储或渲染结果观察已提交事实"
+      ],
+      "id": "rerun-current",
+      "name": "按当前场景版本重新执行",
+      "entry": "POST /v1/jobs/{id}/reruns",
+      "success": "凭expectedRevision在同一事务冻结当前修订并创建新任务，血缘可追溯到源任务",
+      "failure": "过期expectedRevision返回409、缺修订拒绝、源任务保持取消终态",
+      "verification": "python3 scripts/walkthrough.py --workflow rerun-current"
+    },
+    {
       "id": "recover-render",
       "name": "进程重启恢复",
       "entry": "进程启动 Recover",
